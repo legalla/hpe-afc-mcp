@@ -1,0 +1,14 @@
+services:
+  afc-mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: afc-mcp
+    env_file:
+      - .env
+    environment:
+      - MCP_HOST=0.0.0.0
+      - MCP_PORT=8000
+    ports:
+      - "8010:8000"
+    restart: unless-stopped
