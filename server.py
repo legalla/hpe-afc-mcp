@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import logging
 import os
 from collections import Counter
 from typing import Any
@@ -9,14 +11,74 @@ from typing import Any
 from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
 
+import afc_auth
 from afc_client import AFCClient
 
 load_dotenv()
+
+logging.basicConfig(level=os.environ.get("AFC_LOG_LEVEL", "INFO").upper())
+logger = logging.getLogger("afc-mcp")
 
 _host = os.environ.get("MCP_HOST", "0.0.0.0")
 _port = int(os.environ.get("MCP_PORT", "8000"))
 
 mcp = FastMCP("afc-mcp", host=_host, port=_port)
+
+
+# ── Security: optional Bearer authentication ──────────────────────────
+# Disabled by default (backward compatible). Enable via AFC_AUTH_ENABLED=true
+# (typically in docker-compose.yml) once at least one token has been created
+# with `afc_token_manager.py generate --name <client>`.
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    val = os.environ.get(name)
+    if val is None:
+        return default
+    return val.strip().lower() in ("1", "true", "yes", "on")
+
+
+_AUTH_ENABLED = _env_bool("AFC_AUTH_ENABLED", False)
+_TOKENS_FILE = os.environ.get("AFC_TOKENS_FILE", afc_auth.DEFAULT_TOKENS_FILE)
+_MCP_PATH = os.environ.get("AFC_MCP_PATH", "/mcp")
+_TRUST_FORWARDED = _env_bool("AFC_TRUST_FORWARDED_FOR", False)
+
+# Built lazily at startup (see __main__).
+_token_store: "afc_auth.TokenStore | None" = None
+
+
+def _init_security() -> None:
+    """Build the token store and enforce startup rules.
+
+    Policy: if Bearer auth is enabled but no token exists yet, the server still
+    starts but in LOCKED mode — every MCP request is refused (HTTP 503) until a
+    token is created. This lets an operator generate the first token without
+    first disabling authentication; a restart then activates it.
+    """
+    global _token_store
+
+    if not _AUTH_ENABLED:
+        logger.warning(
+            "🔓 Bearer authentication is DISABLED (AFC_AUTH_ENABLED not set). "
+            "The MCP endpoint is open to any client that can reach it."
+        )
+        return
+
+    _token_store = afc_auth.TokenStore(_TOKENS_FILE)
+    if len(_token_store) == 0:
+        logger.warning(
+            "🔒 AFC_AUTH_ENABLED=true but no token found in '%s'. Starting in "
+            "LOCKED mode: all MCP requests are refused (HTTP 503) until a token "
+            "exists. Create the first one with: docker compose exec afc-mcp "
+            "python afc_token_manager.py generate --name <client> — then RESTART "
+            "the container.",
+            _TOKENS_FILE,
+        )
+    else:
+        logger.info(
+            "🔒 Bearer authentication ENABLED — %d token(s) loaded from %s",
+            len(_token_store), _TOKENS_FILE,
+        )
 
 _afc_client: AFCClient | None = None
 
@@ -965,5 +1027,111 @@ def get_vm_attachment(vm_name: str, resolve_switch_names: bool = True) -> dict:
     return {"vm_name": vm_name, "found": True, "matches": results}
 
 
+class _SecurityMiddleware:
+    """Optional Bearer authentication for the MCP endpoint (ASGI).
+
+    When authentication is disabled this is a zero-cost passthrough. Only the
+    MCP path (default ``/mcp``) is guarded; any other path is left untouched.
+    """
+
+    def __init__(self, app, *, auth_enabled, token_store, mcp_path, trust_forwarded):
+        self._app = app
+        self._auth_enabled = auth_enabled
+        self._token_store = token_store
+        self._mcp_path = mcp_path
+        self._trust_forwarded = trust_forwarded
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or not self._auth_enabled:
+            await self._app(scope, receive, send)
+            return
+
+        path = scope.get("path", "")
+        if not path.startswith(self._mcp_path):
+            await self._app(scope, receive, send)
+            return
+
+        headers = {k.decode("latin-1").lower(): v.decode("latin-1")
+                   for k, v in scope.get("headers", [])}
+        src_ip = self._client_ip(scope, headers)
+
+        # LOCKED mode: auth required but no token exists yet.
+        if self._token_store is None or len(self._token_store) == 0:
+            logger.warning("🔒 MCP request refused — server LOCKED (no token "
+                           "configured) from %s %s", src_ip, path)
+            await self._send_503_locked(send)
+            return
+
+        actor = self._resolve_actor(headers)
+        if actor is None:
+            logger.warning("🚫 Rejected unauthenticated request from %s %s", src_ip, path)
+            await self._send_401(send)
+            return
+
+        await self._app(scope, receive, send)
+
+    def _resolve_actor(self, headers: dict) -> str | None:
+        auth = headers.get("authorization", "")
+        if not auth.startswith("Bearer "):
+            return None
+        token = auth[7:].strip()
+        return self._token_store.resolve(token)
+
+    def _client_ip(self, scope, headers: dict) -> str:
+        if self._trust_forwarded:
+            xff = headers.get("x-forwarded-for")
+            if xff:
+                return xff.split(",")[0].strip()
+        client = scope.get("client")
+        return client[0] if client else "unknown"
+
+    @staticmethod
+    async def _send_401(send) -> None:
+        payload = json.dumps({"error": "Missing or invalid bearer token"}).encode()
+        await send({
+            "type": "http.response.start",
+            "status": 401,
+            "headers": [
+                (b"content-type", b"application/json"),
+                (b"content-length", str(len(payload)).encode()),
+                (b"www-authenticate", b"Bearer"),
+            ],
+        })
+        await send({"type": "http.response.body", "body": payload})
+
+    @staticmethod
+    async def _send_503_locked(send) -> None:
+        payload = json.dumps({
+            "error": "Service locked: authentication is enabled but no token is "
+                     "configured. Create the first token with "
+                     "`docker compose exec afc-mcp python afc_token_manager.py "
+                     "generate --name <client>`, then restart the container.",
+        }).encode()
+        await send({
+            "type": "http.response.start",
+            "status": 503,
+            "headers": [
+                (b"content-type", b"application/json"),
+                (b"content-length", str(len(payload)).encode()),
+                (b"retry-after", b"0"),
+            ],
+        })
+        await send({"type": "http.response.body", "body": payload})
+
+
 if __name__ == "__main__":
-    mcp.run(transport="streamable-http")
+    import uvicorn
+
+    _init_security()
+
+    if _AUTH_ENABLED:
+        app = _SecurityMiddleware(
+            mcp.streamable_http_app(),
+            auth_enabled=_AUTH_ENABLED,
+            token_store=_token_store,
+            mcp_path=_MCP_PATH,
+            trust_forwarded=_TRUST_FORWARDED,
+        )
+        uvicorn.run(app, host=_host, port=_port)
+    else:
+        mcp.run(transport="streamable-http")

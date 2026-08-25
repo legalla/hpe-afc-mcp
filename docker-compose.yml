@@ -9,6 +9,14 @@ services:
     environment:
       - MCP_HOST=0.0.0.0
       - MCP_PORT=8000
+      # Bearer authentication for the MCP endpoint (see README).
+      - AFC_AUTH_ENABLED=${AFC_AUTH_ENABLED:-false}
+      - AFC_TOKENS_FILE=/app/secrets/.tokens
+      # Set to true only when behind a trusted reverse proxy.
+      - AFC_TRUST_FORWARDED_FOR=${AFC_TRUST_FORWARDED_FOR:-false}
+    volumes:
+      # Read-write volume holding the named Bearer tokens (.tokens).
+      - ./secrets:/app/secrets
     ports:
       - "8010:8000"
     restart: unless-stopped

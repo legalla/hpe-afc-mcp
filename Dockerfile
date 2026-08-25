@@ -6,7 +6,10 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY afc_client.py server.py ./
+COPY afc_client.py afc_auth.py afc_token_manager.py server.py ./
+
+# Secrets volume mount point, owned by the non-root container user.
+RUN mkdir -p /app/secrets && chown -R mcp:mcp /app/secrets
 
 USER mcp
 

@@ -47,7 +47,58 @@ The server speaks MCP over **streamable-HTTP**:
 URL:  http://<docker-host>:8010/mcp
 ```
 
-There is no authentication on the MCP endpoint itself; protect it at the network level.
+By default the endpoint is open. You can enable Bearer-token authentication so
+only clients presenting a valid token can call the tools (see below).
+
+## Authentication (Bearer token)
+
+Authentication is **optional and disabled by default** (backward compatible).
+When enabled, every MCP request must carry an `Authorization: Bearer <token>`
+header; requests without a valid token are rejected with `401`.
+
+Tokens are *named* (one per client) and stored in `secrets/.tokens` (git-ignored,
+mounted read-write into the container).
+
+1. Create the first token (run on the host or inside the container):
+
+```bash
+# on the host (stdlib only, no dependencies needed)
+cd afc-mcp
+python afc_token_manager.py generate --name "vscode-dev" --description "Laptop VSCode"
+
+# ...or inside the running container
+docker compose exec afc-mcp python afc_token_manager.py generate --name "vscode-dev"
+```
+
+The command prints the clear-text token **once** — copy it now.
+
+2. Enable auth and (re)start the server:
+
+```bash
+# in .env or the shell environment
+AFC_AUTH_ENABLED=true
+
+docker compose up -d --build
+```
+
+> Safety net: if `AFC_AUTH_ENABLED=true` but no token exists yet, the server
+> starts in **LOCKED** mode and refuses every request (`503`) until a token is
+> created and the container restarted. This prevents accidentally exposing an
+> open endpoint.
+
+Manage tokens with the CLI:
+
+```bash
+python afc_token_manager.py list                 # masked preview
+python afc_token_manager.py show --name vscode-dev  # reveal a value
+python afc_token_manager.py revoke --name vscode-dev
+```
+
+Revoking or adding a token requires a container restart to take effect.
+
+> Note: `MCP_HOST` / `MCP_PORT` only control **where the server listens** inside
+> the container (`0.0.0.0:8000`, mapped to host `8010`). They are unrelated to
+> authentication — they say *where* the server listens, not *who* may call it.
 
 ## Integrate with VS Code
 
@@ -67,6 +118,20 @@ VS Code (with GitHub Copilot / agent mode) discovers MCP servers from an `mcp.js
 ```
 
 > Replace `localhost` with the Docker host address if the container runs elsewhere.
+>
+> If authentication is enabled, add the Bearer token as a header:
+>
+> ```json
+> {
+>   "servers": {
+>     "afc-mcp": {
+>       "type": "http",
+>       "url": "http://localhost:8010/mcp",
+>       "headers": { "Authorization": "Bearer afc_xxxxxxxx" }
+>     }
+>   }
+> }
+> ```
 
 2. Open the Command Palette → **MCP: List Servers**, select `afc-mcp` and start it.
 3. In the Chat view (Agent mode), the AFC tools become available under the tools picker.
