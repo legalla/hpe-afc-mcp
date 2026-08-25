@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import logging
 import os
@@ -203,6 +204,168 @@ def _ospf_down_neighbors(vrf_uuid: str | None, vrf_name: str | None, ospf_data: 
     return down
 
 
+def _looks_like_uuid(value: str) -> bool:
+    """Heuristic: AFC UUIDs are 32 hex chars, optionally hyphenated (36)."""
+    v = value.strip().replace("-", "")
+    return len(v) == 32 and all(c in "0123456789abcdefABCDEF" for c in v)
+
+
+def _find_switch(switch: str) -> dict[str, Any] | None:
+    """Return the switch record matching a UUID or a name, if any."""
+    switches = _items_from_response(_client().list_switches())
+    if _looks_like_uuid(switch):
+        return next((s for s in switches if s.get("uuid") == switch), None)
+    return next((s for s in switches if str(s.get("name", "")).lower() == switch.lower()), None)
+
+
+def _resolve_switch_uuid(switch: str) -> str:
+    """Return a switch UUID from a UUID (passthrough) or a switch name (looked up)."""
+    if _looks_like_uuid(switch):
+        return switch
+    record = _find_switch(switch)
+    if record and record.get("uuid"):
+        return record["uuid"]
+    raise ValueError(f"No switch named '{switch}' was found.")
+
+
+def _resolve_vrf_uuid(vrf: str, fabric_uuid: str | None = None) -> str:
+    """Return a VRF UUID from a UUID (passthrough) or a VRF name.
+
+    VRF names are not globally unique (one instance per fabric). When several
+    VRFs share the name, `fabric_uuid` (typically that of the target switch) is
+    used to pick the right instance; ambiguity without a hint raises an error
+    listing the candidates.
+    """
+    if _looks_like_uuid(vrf):
+        return vrf
+    matches = [
+        item
+        for item in _items_from_response(
+            _client().list_vrfs(include_bgp=False, include_ospf=False, include_networks=False)
+        )
+        if str(item.get("name", "")).lower() == vrf.lower()
+    ]
+    if not matches:
+        raise ValueError(f"No VRF named '{vrf}' was found.")
+    if fabric_uuid:
+        scoped = [m for m in matches if m.get("fabric_uuid") == fabric_uuid]
+        if scoped:
+            matches = scoped
+    if len(matches) == 1:
+        uuid = matches[0].get("uuid")
+        if uuid:
+            return uuid
+    candidates = ", ".join(f"{m.get('uuid')} (fabric {m.get('fabric_uuid')})" for m in matches)
+    raise ValueError(
+        f"VRF name '{vrf}' is ambiguous ({len(matches)} instances). Pass a switch "
+        f"to scope it to its fabric, or use a VRF UUID. Candidates: {candidates}"
+    )
+
+
+
+def _format_prefix(prefix: Any) -> str | None:
+    """Render an AFC prefix as ``a.b.c.d/len``.
+
+    The live API returns the prefix as a ready-made CIDR string; the OpenAPI
+    schema documents it as an object ``{address, prefix_length}``. Accept both.
+    """
+    if isinstance(prefix, str):
+        return prefix or None
+    if isinstance(prefix, dict):
+        address = prefix.get("address")
+        length = prefix.get("prefix_length")
+        if address is None or length is None:
+            return None
+        return f"{address}/{length}"
+    return None
+
+
+def _normalize_next_hops(next_hop_info: Any) -> list[dict[str, Any]]:
+    """Normalize ``next_hop_info`` (a string like 'blackhole' or a list) into a list."""
+    if isinstance(next_hop_info, str):
+        return [{"next_hop": None, "interface": None, "type": next_hop_info}]
+    if isinstance(next_hop_info, list):
+        hops: list[dict[str, Any]] = []
+        for hop in next_hop_info:
+            if isinstance(hop, dict):
+                hops.append({"next_hop": hop.get("next_hop"), "interface": hop.get("interface")})
+        return hops
+    return []
+
+
+def _simplify_route(route: dict[str, Any]) -> dict[str, Any]:
+    """Reduce a raw AFC route entry to the routing-decision essentials."""
+    return {
+        "prefix": _format_prefix(route.get("prefix")),
+        "next_hops": _normalize_next_hops(route.get("next_hop_info")),
+        "protocol": route.get("protocol"),
+        "sub_protocol_type": route.get("sub_protocol_type"),
+        "route_type": route.get("route_type"),
+        "distance": route.get("distance"),
+        "metric": route.get("metric"),
+        "address_family": route.get("address_family"),
+        "switch_name": route.get("switch_name"),
+        "switch_uuid": route.get("switch_uuid"),
+    }
+
+
+def _simplify_static_route(route: dict[str, Any]) -> dict[str, Any]:
+    """Reduce a raw AFC static-route entry to its configuration essentials.
+
+    ``next_hop`` is null for a nullroute (discard) entry; ``0.0.0.0`` means the
+    route follows the default route. ``switch_uuids`` is empty for fabric-scoped
+    routes.
+    """
+    return {
+        "name": route.get("name"),
+        "destination": _format_prefix(route.get("destination")),
+        "next_hop": route.get("next_hop"),
+        "nexthop_interface_name": route.get("nexthop_interface_name"),
+        "type": route.get("type"),
+        "distance": route.get("distance"),
+        "tag": route.get("tag"),
+        "switch_uuids": route.get("switch_uuids"),
+        "description": route.get("description"),
+        "uuid": route.get("uuid"),
+    }
+
+
+def _longest_prefix_match(routes: list[dict[str, Any]], destination: str) -> list[dict[str, Any]]:
+    """Return the most specific route(s) covering *destination* (an IP or CIDR).
+
+    Mirrors the forwarding decision: among routes whose prefix contains the
+    destination, keep those with the longest prefix length. An exact prefix
+    match wins outright. Returns all routes sharing the best length (e.g. the
+    same prefix installed on several switches or as ECMP).
+    """
+    try:
+        query_net = ipaddress.ip_network(destination, strict=False)
+    except ValueError:
+        return []
+
+    best_len = -1
+    winners: list[dict[str, Any]] = []
+    for route in routes:
+        prefix = route.get("prefix")
+        if not prefix:
+            continue
+        try:
+            route_net = ipaddress.ip_network(prefix, strict=False)
+        except ValueError:
+            continue
+        if route_net.version != query_net.version:
+            continue
+        # The route covers the destination when the queried network is a subnet
+        # of (or equal to) the route's prefix.
+        if query_net.subnet_of(route_net):
+            plen = route_net.prefixlen
+            if plen > best_len:
+                best_len = plen
+                winners = [route]
+            elif plen == best_len:
+                winners.append(route)
+    return winners
+
 
 
 @mcp.tool()
@@ -217,9 +380,12 @@ def get_server_status() -> dict:
             "switch inventory and status",
             "fabric inventory",
             "vrf, bgp, ospf and evpn visibility",
+            "vrf routing tables (ip route) and next-hop lookup",
+            "vrf arp tables, ip interfaces and static routes",
             "virtual overlay and underlay details",
         ],
     }
+
 
 
 @mcp.tool()
@@ -380,6 +546,194 @@ def get_vrf_ospf_summary(
         switch_uuid=switch_uuid,
         ospf_router_uuid=ospf_router_uuid,
     )
+
+
+@mcp.tool()
+def get_vrf_routes(
+    vrf: str,
+    switch: str | None = None,
+    destination: str | None = None,
+    protocol: str | None = None,
+    filter_query: str | None = None,
+    page: int | None = None,
+    page_size: int | None = None,
+) -> dict:
+    """Return the IP routing table (RIB) of a VRF, with optional next-hop lookup.
+
+    `vrf` and `switch` accept either a UUID or a name (e.g. `mgmt`,
+    `DC-8100-Leaf5`); names are resolved automatically. When `destination` is a
+    host IP or CIDR, the tool performs a longest-prefix match and returns the
+    winning route(s) and their next hop(s) — answering "what is the next hop
+    toward X". `protocol` optionally filters by origin (bgp, ospf, static,
+    connected, local, rip).
+    """
+    # Resolve the switch first so its fabric can disambiguate same-named VRFs.
+    switch_record = _find_switch(switch) if switch else None
+    switch_uuid = None
+    if switch:
+        switch_uuid = (switch_record or {}).get("uuid") or _resolve_switch_uuid(switch)
+    fabric_uuid = (switch_record or {}).get("fabric_uuid")
+    vrf_uuid = _resolve_vrf_uuid(vrf, fabric_uuid=fabric_uuid)
+    switches = [switch_uuid] if switch_uuid else None
+
+    data = _client().list_vrf_ip_routes(
+        vrf_uuid=vrf_uuid,
+        switches=switches,
+        filter_query=filter_query,
+        page=page,
+        page_size=page_size,
+    )
+    routes = [_simplify_route(r) for r in _items_from_response(data)]
+
+    if protocol:
+        routes = [r for r in routes if str(r.get("protocol", "")).lower() == protocol.lower()]
+
+    response: dict[str, Any] = {
+        "vrf": vrf,
+        "vrf_uuid": vrf_uuid,
+        "switch": switch,
+        "count": len(routes),
+        "routes": routes,
+        "page": data.get("page"),
+    }
+
+    if destination:
+        best = _longest_prefix_match(routes, destination)
+        response["destination"] = destination
+        response["matched_routes"] = best
+        response["next_hops"] = [hop for route in best for hop in route.get("next_hops", [])]
+        response["count"] = len(best)
+        # Keep the full table available but move it under a secondary key.
+        response["routes"] = best
+        response["all_routes"] = routes
+
+    return response
+
+
+
+@mcp.tool()
+def get_vrf_arp(
+    vrf: str,
+    switch: str | None = None,
+    filter_query: str | None = None,
+    page: int | None = None,
+    page_size: int | None = None,
+) -> dict:
+    """Return the ARP table of a VRF (IP-to-MAC bindings learned on switches).
+
+    `vrf` and `switch` accept either a UUID or a name (e.g. `default`,
+    `DC-8100-Leaf5`); names are resolved automatically. Pass `switch` to scope
+    the table to one switch and to disambiguate same-named VRFs across fabrics.
+    Each entry maps an IP address to a MAC address, the interface / physical
+    port it was learned on, the owning switch and the neighbor reachability
+    state (reachable, stale, incomplete, failed, permanent).
+    """
+    switch_record = _find_switch(switch) if switch else None
+    switch_uuid = None
+    if switch:
+        switch_uuid = (switch_record or {}).get("uuid") or _resolve_switch_uuid(switch)
+    fabric_uuid = (switch_record or {}).get("fabric_uuid")
+    vrf_uuid = _resolve_vrf_uuid(vrf, fabric_uuid=fabric_uuid)
+    switches = [switch_uuid] if switch_uuid else None
+
+    data = _client().list_vrf_arp(
+        vrf_uuid=vrf_uuid,
+        switches=switches,
+        filter_query=filter_query,
+        page=page,
+        page_size=page_size,
+    )
+    entries = _items_from_response(data)
+    return {
+        "vrf": vrf,
+        "vrf_uuid": vrf_uuid,
+        "switch": switch,
+        "count": data.get("count", len(entries)),
+        "arp_entries": entries,
+        "page": data.get("page"),
+    }
+
+
+
+@mcp.tool()
+def get_vrf_ip_interfaces(
+    vrf: str,
+    switch: str | None = None,
+    if_type: str | None = None,
+    include_status: bool = True,
+    filter_query: str | None = None,
+) -> dict:
+    """Return the IP (L3) interfaces configured in a VRF.
+
+    `vrf` and `switch` accept either a UUID or a name; names are resolved
+    automatically (pass `switch` to disambiguate same-named VRFs across
+    fabrics). `if_type` filters by interface kind: `routed`, `vlan`, `loopback`
+    or `evpn`. When `include_status` is true, the operational state (admin
+    up/down, MAC address, IP MTU, duplex, IPv4 address) is fetched from the
+    interface status endpoint and returned under `status`, scoped to `switch`
+    when provided.
+    """
+    switch_record = _find_switch(switch) if switch else None
+    switch_uuid = None
+    if switch:
+        switch_uuid = (switch_record or {}).get("uuid") or _resolve_switch_uuid(switch)
+    fabric_uuid = (switch_record or {}).get("fabric_uuid")
+    vrf_uuid = _resolve_vrf_uuid(vrf, fabric_uuid=fabric_uuid)
+
+    data = _client().list_vrf_ip_interfaces(
+        vrf_uuid=vrf_uuid,
+        if_type=if_type,
+        filter_query=filter_query,
+    )
+    interfaces = _items_from_response(data)
+    response: dict[str, Any] = {
+        "vrf": vrf,
+        "vrf_uuid": vrf_uuid,
+        "switch": switch,
+        "if_type": if_type,
+        "count": data.get("count", len(interfaces)),
+        "interfaces": data.get("result", interfaces),
+        "page": data.get("page"),
+    }
+    if include_status:
+        status = _client().get_vrf_ip_interfaces_status(
+            vrf_uuid=vrf_uuid,
+            switch_uuid=switch_uuid,
+        )
+        result = status.get("result", status)
+        response["status"] = result.get("interfaces") if isinstance(result, dict) else result
+    return response
+
+
+
+@mcp.tool()
+def get_vrf_static_routes(vrf: str, switch: str | None = None) -> dict:
+    """Return the IP static routes configured in a VRF.
+
+    `vrf` and `switch` accept either a UUID or a name; names are resolved
+    automatically (pass `switch` to disambiguate same-named VRFs across
+    fabrics). Each route exposes its destination prefix, next hop (an IP, or
+    null for a nullroute / discard entry; `0.0.0.0` means follow the default
+    route), optional next-hop interface, administrative distance, tag, type
+    (`forward` / `nullroute`) and the switches it is applied to (empty for
+    fabric-scoped routes). AFC has no dedicated static-route listing endpoint,
+    so these are read from the VRF object.
+    """
+    switch_record = _find_switch(switch) if switch else None
+    fabric_uuid = (switch_record or {}).get("fabric_uuid")
+    vrf_uuid = _resolve_vrf_uuid(vrf, fabric_uuid=fabric_uuid)
+
+    data = _client().get_vrf_static_routes(vrf_uuid=vrf_uuid)
+    result = data.get("result", data)
+    routes = result.get("ip_static_routes", []) if isinstance(result, dict) else []
+    return {
+        "vrf": vrf,
+        "vrf_uuid": vrf_uuid,
+        "switch": switch,
+        "count": len(routes),
+        "static_routes": [_simplify_static_route(r) for r in routes],
+    }
+
 
 
 @mcp.tool()

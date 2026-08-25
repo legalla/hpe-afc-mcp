@@ -327,6 +327,97 @@ class AFCClient:
             params={"filter": filter_query},
         )
 
+    def list_vrf_ip_routes(
+        self,
+        vrf_uuid: str,
+        switches: list[str] | None = None,
+        count_only: bool = False,
+        filter_query: str | None = None,
+        page: int | None = None,
+        page_size: int | None = None,
+    ) -> dict[str, Any]:
+        return self._request(
+            "GET",
+            f"/vrfs/{vrf_uuid}/ip_tables/ip_route",
+            params={
+                "switches": switches,
+                "count_only": count_only,
+                "filter": filter_query,
+                "page": page,
+                "page_size": page_size,
+            },
+        )
+
+    def list_vrf_arp(
+        self,
+        vrf_uuid: str,
+        switches: list[str] | None = None,
+        count_only: bool = False,
+        filter_query: str | None = None,
+        page: int | None = None,
+        page_size: int | None = None,
+    ) -> dict[str, Any]:
+        return self._request(
+            "GET",
+            f"/vrfs/{vrf_uuid}/ip_tables/arp",
+            params={
+                "switches": switches,
+                "count_only": count_only,
+                "filter": filter_query,
+                "page": page,
+                "page_size": page_size,
+            },
+        )
+
+    def list_vrf_ip_interfaces(
+        self,
+        vrf_uuid: str,
+        if_type: str | None = None,
+        filter_query: str | None = None,
+    ) -> dict[str, Any]:
+        return self._request(
+            "GET",
+            f"/vrfs/{vrf_uuid}/ip_interfaces",
+            params={
+                "if_type": if_type,
+                "filter": filter_query,
+            },
+        )
+
+    def get_vrf_ip_interfaces_status(
+        self,
+        vrf_uuid: str,
+        switch_uuid: str | None = None,
+        if_uuid: str | None = None,
+        filter_query: str | None = None,
+    ) -> dict[str, Any]:
+        return self._request(
+            "GET",
+            f"/vrfs/{vrf_uuid}/ip_interfaces/status",
+            params={
+                "switch_uuid": switch_uuid,
+                "if_uuid": if_uuid,
+                "filter": filter_query,
+            },
+        )
+
+    def get_vrf_static_routes(self, vrf_uuid: str) -> dict[str, Any]:
+        # AFC exposes no dedicated static-route listing endpoint; static routes
+        # are returned nested in the VRF object via ip_static_routes=true.
+        return self._request(
+            "GET",
+            f"/vrfs/{vrf_uuid}",
+            params={
+                "ip_static_routes": True,
+                "include_bgp_global": False,
+                "include_bgp": False,
+                "include_ospf_global": False,
+                "include_ospf": False,
+                "include_networks": False,
+                "ip_interfaces": False,
+            },
+        )
+
     # EVPN and virtual networking domains
     def list_evpn(
         self,

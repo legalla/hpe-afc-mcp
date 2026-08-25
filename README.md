@@ -174,6 +174,9 @@ Restart Claude Desktop; `afc-mcp` appears in the tools menu.
 
 ### Routing & overlay
 - `list_vrfs`, `get_vrf` — VRF inventory and detail.
+- `get_vrf_routes` — VRF IP routing table (RIB) with next-hop lookup. Accepts VRF
+  and switch by **name or UUID**; with a `destination` (host IP or CIDR) it does a
+  longest-prefix match and returns the winning route(s) and next hop(s).
 - `get_vrf_bgp_status`, `get_vrf_bgp_summary` — BGP state and summary per VRF.
 - `get_vrf_ospf_neighbors`, `get_vrf_ospf_summary` — OSPF neighbors and summary per VRF.
 - `list_evpn`, `list_evpn_routes` — EVPN instances and routes.
