@@ -177,6 +177,17 @@ Restart Claude Desktop; `afc-mcp` appears in the tools menu.
 - `get_vrf_routes` — VRF IP routing table (RIB) with next-hop lookup. Accepts VRF
   and switch by **name or UUID**; with a `destination` (host IP or CIDR) it does a
   longest-prefix match and returns the winning route(s) and next hop(s).
+- `get_vrf_arp` — VRF ARP table (IP-to-MAC bindings) learned on the switches.
+  Accepts VRF and switch by **name or UUID**; pass `switch` to scope the table to
+  one switch. Each entry exposes the IP/MAC, interface, physical port, owning
+  switch and neighbor reachability state (reachable, stale, incomplete, …).
+- `get_vrf_ip_interfaces` — VRF L3 (IP) interfaces. Accepts VRF and switch by
+  **name or UUID**; filter by `if_type` (`routed`, `vlan`, `loopback`, `evpn`).
+  With `include_status` (default), the operational state (admin up/down, MAC,
+  IP MTU, duplex, IPv4 address) is returned alongside the configuration.
+- `get_vrf_static_routes` — IP static routes configured in a VRF (destination
+  prefix, next hop or nullroute/discard, next-hop interface, distance, tag, type
+  and applied switches). Accepts VRF and switch by **name or UUID**.
 - `get_vrf_bgp_status`, `get_vrf_bgp_summary` — BGP state and summary per VRF.
 - `get_vrf_ospf_neighbors`, `get_vrf_ospf_summary` — OSPF neighbors and summary per VRF.
 - `list_evpn`, `list_evpn_routes` — EVPN instances and routes.
