@@ -580,6 +580,38 @@ def get_vrf(
 
 
 @mcp.tool()
+def get_vrf_switches(vrf: str, fabric: str | None = None, switch: str | None = None) -> dict:
+    """List the switches on which a VRF is actually deployed.
+
+    This answers "where is this VRF deployed?". `vrf` accepts a UUID or a name
+    (e.g. `sense`). VRF names are NOT unique across fabrics (one instance per
+    fabric), so pass `fabric` (name or UUID) or `switch` (name or UUID) to
+    disambiguate and select the right instance; otherwise an ambiguous name
+    raises an error listing the candidates. The result is read from the
+    authoritative `/vrfs/{uuid}/switches` endpoint — an empty list means the VRF
+    exists in configuration but is not applied to any switch.
+    """
+    fabric_uuid: str | None = None
+    if switch:
+        switch_record = _find_switch(switch)
+        fabric_uuid = (switch_record or {}).get("fabric_uuid")
+    if fabric_uuid is None and fabric:
+        fabric_uuid = _resolve_fabric_uuid(fabric)
+    vrf_uuid = _resolve_vrf_uuid(vrf, fabric_uuid=fabric_uuid)
+
+    data = _client().list_vrf_switches(vrf_uuid=vrf_uuid)
+    switches = _items_from_response(data)
+    return {
+        "vrf": vrf,
+        "vrf_uuid": vrf_uuid,
+        "fabric_uuid": fabric_uuid,
+        "deployed": bool(switches),
+        "count": data.get("count", len(switches)),
+        "switches": switches,
+    }
+
+
+@mcp.tool()
 def get_vrf_bgp_status(vrf_uuid: str, switch_uuid: str | None = None, include_neighbors: bool = True) -> dict:
     """Get BGP status for a VRF, globally or per switch."""
     return _client().get_vrf_bgp_status(
@@ -1066,6 +1098,130 @@ def list_subleaf_leaf(
         "result": result,
         "page": data.get("page"),
     }
+
+
+def _fabric_name_map() -> dict[str, str]:
+    """Build a fabric_uuid -> fabric_name map (best-effort)."""
+    try:
+        fabrics = _items_from_response(_client().list_fabrics(include_switches=False))
+    except Exception:  # noqa: BLE001 - name resolution is best-effort
+        return {}
+    return {f["uuid"]: f.get("name") for f in fabrics if f.get("uuid")}
+
+
+@mcp.tool()
+def list_multi_hop_vxlan(
+    fabric: str | None = None,
+    filter_query: str | None = None,
+    page: int | None = None,
+    page_size: int | None = None,
+) -> dict:
+    """List Multi-Fabric (Multi-Hop VXLAN) configurations that stitch fabrics together.
+
+    Each object describes how one fabric's border leader peers with remote fabrics
+    over L3 eBGP to extend VXLAN across sites: `name`, `fabric_uuid`/`fabric_name`
+    (the local fabric), `border_leader`/`border_leader_name`, `l3_ebgp_borders` and
+    `remote_fabrics` (each with site_name, fabric_name, remote border leader, ASN and
+    BGP peer IPs). Pass `fabric` (name or UUID) to scope the query to one fabric, or
+    omit it to list Multi-Hop VXLAN objects across all fabrics.
+    """
+    if fabric is not None:
+        data = _client().list_fabric_multi_hop_vxlan(
+            fabric_uuid=_resolve_fabric_uuid(fabric),
+            filter_query=filter_query,
+            page=page,
+            page_size=page_size,
+        )
+    else:
+        data = _client().list_multi_hop_vxlan(
+            filter_query=filter_query,
+            page=page,
+            page_size=page_size,
+        )
+    result = data.get("result", [])
+    if result:
+        names = _fabric_name_map()
+        for obj in result:
+            if isinstance(obj, dict) and obj.get("fabric_uuid"):
+                obj.setdefault("fabric_name", names.get(obj["fabric_uuid"]))
+    return {
+        "count": data.get("count", len(_items_from_response(data))),
+        "result": result,
+        "page": data.get("page"),
+    }
+
+
+@mcp.tool()
+def get_multi_hop_vxlan(
+    fabric: str,
+    uuid: str,
+    filter_query: str | None = None,
+) -> dict:
+    """Get one Multi-Fabric (Multi-Hop VXLAN) configuration by UUID within a fabric.
+
+    `fabric` accepts a fabric name or UUID; it is resolved automatically.
+    """
+    data = _client().get_multi_hop_vxlan(
+        fabric_uuid=_resolve_fabric_uuid(fabric),
+        uuid=uuid,
+        filter_query=filter_query,
+    )
+    obj = data.get("result", data)
+    if isinstance(obj, dict) and obj.get("fabric_uuid"):
+        obj.setdefault("fabric_name", _fabric_name_map().get(obj["fabric_uuid"]))
+    return data
+
+
+@mcp.tool()
+def list_stretched_vlans(
+    fabric: str | None = None,
+    filter_query: str | None = None,
+    page: int | None = None,
+    page_size: int | None = None,
+) -> dict:
+    """List Stretched VLAN (EVPN Multi-Site) configurations spanning multiple fabrics.
+
+    Each object exposes the `fabric_uuids` (and resolved `fabric_names`) the VLANs are
+    stretched across, the `stretched_vlans` range (e.g. "5, 20-50, 70") and the
+    `global_route_targets`. Pass `fabric` (name or UUID) to return only stretched-VLAN
+    objects that include that fabric, or omit it to list across all fabrics.
+    """
+    fabrics = [_resolve_fabric_uuid(fabric)] if fabric is not None else None
+    data = _client().list_evpn_multi_site(
+        fabrics=fabrics,
+        filter_query=filter_query,
+        page=page,
+        page_size=page_size,
+    )
+    result = data.get("result", [])
+    if result:
+        names = _fabric_name_map()
+        for obj in result:
+            if isinstance(obj, dict) and isinstance(obj.get("fabric_uuids"), list):
+                obj.setdefault(
+                    "fabric_names",
+                    [names.get(u) for u in obj["fabric_uuids"]],
+                )
+    return {
+        "count": data.get("count", len(_items_from_response(data))),
+        "result": result,
+        "page": data.get("page"),
+    }
+
+
+@mcp.tool()
+def get_stretched_vlan(uuid: str, filter_query: str | None = None) -> dict:
+    """Get one Stretched VLAN (EVPN Multi-Site) configuration by UUID.
+
+    Returns the fabric_uuids (with resolved fabric_names), the stretched VLAN range
+    and the global route targets for the object.
+    """
+    data = _client().get_evpn_multi_site(uuid=uuid, filter_query=filter_query)
+    obj = data.get("result", data)
+    if isinstance(obj, dict) and isinstance(obj.get("fabric_uuids"), list):
+        names = _fabric_name_map()
+        obj.setdefault("fabric_names", [names.get(u) for u in obj["fabric_uuids"]])
+    return data
 
 
 @mcp.tool()

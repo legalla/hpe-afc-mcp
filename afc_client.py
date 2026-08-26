@@ -392,6 +392,88 @@ class AFCClient:
             },
         )
 
+    # Multi-Fabric (Multi-Hop VXLAN) — inter-fabric VXLAN stitching via border leaders
+    def list_multi_hop_vxlan(
+        self,
+        count_only: bool = False,
+        filter_query: str | None = None,
+        page: int | None = None,
+        page_size: int | None = None,
+    ) -> dict[str, Any]:
+        return self._request(
+            "GET",
+            "/fabrics/multi_hop_vxlan",
+            params={
+                "count_only": count_only,
+                "filter": filter_query,
+                "page": page,
+                "page_size": page_size,
+            },
+        )
+
+    def list_fabric_multi_hop_vxlan(
+        self,
+        fabric_uuid: str,
+        count_only: bool = False,
+        filter_query: str | None = None,
+        page: int | None = None,
+        page_size: int | None = None,
+    ) -> dict[str, Any]:
+        return self._request(
+            "GET",
+            f"/fabrics/{fabric_uuid}/multi_hop_vxlan",
+            params={
+                "count_only": count_only,
+                "filter": filter_query,
+                "page": page,
+                "page_size": page_size,
+            },
+        )
+
+    def get_multi_hop_vxlan(
+        self,
+        fabric_uuid: str,
+        uuid: str,
+        filter_query: str | None = None,
+    ) -> dict[str, Any]:
+        return self._request(
+            "GET",
+            f"/fabrics/{fabric_uuid}/multi_hop_vxlan/{uuid}",
+            params={"filter": filter_query},
+        )
+
+    # Stretched VLAN (EVPN Multi-Site) — VLANs stretched across fabrics
+    def list_evpn_multi_site(
+        self,
+        fabrics: list[str] | None = None,
+        count_only: bool = False,
+        filter_query: str | None = None,
+        page: int | None = None,
+        page_size: int | None = None,
+    ) -> dict[str, Any]:
+        return self._request(
+            "GET",
+            "/evpn/multi_site",
+            params={
+                "fabrics": fabrics,
+                "count_only": count_only,
+                "filter": filter_query,
+                "page": page,
+                "page_size": page_size,
+            },
+        )
+
+    def get_evpn_multi_site(
+        self,
+        uuid: str,
+        filter_query: str | None = None,
+    ) -> dict[str, Any]:
+        return self._request(
+            "GET",
+            f"/evpn/multi_site/{uuid}",
+            params={"filter": filter_query},
+        )
+
     # NTP / DNS client configurations
     def list_ntp_configurations(
         self,
@@ -489,6 +571,13 @@ class AFCClient:
                 "include_networks": include_networks,
                 "ip_interfaces": include_interfaces,
             },
+        )
+
+    def list_vrf_switches(self, vrf_uuid: str, filter_query: str | None = None) -> dict[str, Any]:
+        return self._request(
+            "GET",
+            f"/vrfs/{vrf_uuid}/switches",
+            params={"filter": filter_query},
         )
 
     def get_vrf_bgp_status(

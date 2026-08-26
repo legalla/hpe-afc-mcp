@@ -224,6 +224,22 @@ Restart Claude Desktop; `afc-mcp` appears in the tools menu.
   (**name or UUID**) and `in_use_only`.
 
 
+### Multi-Fabric & Stretched VLAN
+- `list_multi_hop_vxlan` — Multi-Fabric (Multi-Hop VXLAN) configurations that stitch
+  fabrics together: how one fabric's border leader peers with remote fabrics over
+  L3 eBGP to extend VXLAN across sites (`name`, local `fabric_uuid`/`fabric_name`,
+  `border_leader`/`border_leader_name`, `l3_ebgp_borders` and `remote_fabrics` with
+  each remote's site/fabric name, border leader, ASN and BGP peer IPs). Pass `fabric`
+  (**name or UUID**) to scope to one fabric, or omit it to list across all fabrics.
+- `get_multi_hop_vxlan` — one Multi-Hop VXLAN configuration by UUID within a fabric.
+- `list_stretched_vlans` — Stretched VLAN (EVPN Multi-Site) configurations spanning
+  multiple fabrics: the `fabric_uuids` (with resolved `fabric_names`), the
+  `stretched_vlans` range (e.g. `"5, 20-50, 70"`) and the `global_route_targets`.
+  Pass `fabric` (**name or UUID**) to return only objects that include that fabric,
+  or omit it to list across all fabrics.
+- `get_stretched_vlan` — one Stretched VLAN (EVPN Multi-Site) configuration by UUID.
+
+
 ### Sites & overview
 - `list_afc_sites`, `get_afc_site_inventory` — AFC (remote) sites and their inventory.
 - `get_network_overview` — aggregated network state snapshot.
