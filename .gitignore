@@ -6,6 +6,7 @@ secrets/
 
 # API spec (not distributed)
 openapi.json
+openapi74.json
 
 # Python
 __pycache__/

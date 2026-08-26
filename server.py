@@ -228,6 +228,17 @@ def _resolve_switch_uuid(switch: str) -> str:
     raise ValueError(f"No switch named '{switch}' was found.")
 
 
+def _resolve_fabric_uuid(fabric: str) -> str:
+    """Return a fabric UUID from a UUID (passthrough) or a fabric name (looked up)."""
+    if _looks_like_uuid(fabric):
+        return fabric
+    fabrics = _items_from_response(_client().list_fabrics(include_switches=False))
+    match = next((f for f in fabrics if str(f.get("name", "")).lower() == fabric.lower()), None)
+    if match and match.get("uuid"):
+        return match["uuid"]
+    raise ValueError(f"No fabric named '{fabric}' was found.")
+
+
 def _resolve_vrf_uuid(vrf: str, fabric_uuid: str | None = None) -> str:
     """Return a VRF UUID from a UUID (passthrough) or a VRF name.
 
@@ -383,6 +394,9 @@ def get_server_status() -> dict:
             "vrf routing tables (ip route) and next-hop lookup",
             "vrf arp tables, ip interfaces and static routes",
             "virtual overlay and underlay details",
+            "leaf-spine underlay/overlay and L2 leaf-spine configurations",
+            "vsx switch-pair (mlag) configurations",
+            "ntp and dns client configurations",
         ],
     }
 
@@ -779,6 +793,219 @@ def get_vrf_virtual_environment(vrf_uuid: str, filter_query: str | None = None) 
         "vrf_uuid": vrf_uuid,
         "overlay": overlay.get("result", overlay),
         "underlay": underlay.get("result", underlay),
+    }
+
+
+@mcp.tool()
+def list_leaf_spine(
+    fabric: str | None = None,
+    include_interface: bool = False,
+    filter_query: str | None = None,
+    page: int | None = None,
+    page_size: int | None = None,
+) -> dict:
+    """List Leaf-Spine peer configurations (the fabric underlay building blocks).
+
+    Each object describes how leaves peer with spines (name, QoS trust and the
+    per-switch leaf-spine peers). Pass `fabric` (name or UUID) to scope the query
+    to one fabric; omit it to list Leaf-Spine objects across all fabrics. Set
+    include_interface=True to expand the underlying leaf-spine interface details.
+    """
+    if fabric is not None:
+        data = _client().list_fabric_leaf_spine(
+            fabric_uuid=_resolve_fabric_uuid(fabric),
+            include_interface=include_interface,
+            filter_query=filter_query,
+            page=page,
+            page_size=page_size,
+        )
+    else:
+        data = _client().list_leaf_spine(
+            include_interface=include_interface,
+            filter_query=filter_query,
+            page=page,
+            page_size=page_size,
+        )
+    items = _items_from_response(data)
+    return {
+        "count": data.get("count", len(items)),
+        "result": data.get("result", []),
+        "page": data.get("page"),
+    }
+
+
+@mcp.tool()
+def get_leaf_spine(
+    fabric: str,
+    leaf_spine_uuid: str,
+    include_interface: bool = False,
+    filter_query: str | None = None,
+) -> dict:
+    """Get one Leaf-Spine peer configuration by UUID within a fabric.
+
+    `fabric` accepts a fabric name or UUID; it is resolved automatically.
+    """
+    return _client().get_leaf_spine(
+        fabric_uuid=_resolve_fabric_uuid(fabric),
+        leaf_spine_uuid=leaf_spine_uuid,
+        include_interface=include_interface,
+        filter_query=filter_query,
+    )
+
+
+@mcp.tool()
+def list_l2_leaf_spine(
+    fabric: str | None = None,
+    include_lag: bool = False,
+    filter_query: str | None = None,
+    page: int | None = None,
+    page_size: int | None = None,
+) -> dict:
+    """List Layer-2 Leaf-Spine configurations across one or all fabrics.
+
+    Pass `fabric` (name or UUID) to scope the query to a single fabric. Set
+    include_lag=True to expand the LAG details of each L2 leaf-spine peer.
+    """
+    fabrics = [_resolve_fabric_uuid(fabric)] if fabric is not None else None
+    data = _client().list_l2_leaf_spine(
+        fabrics=fabrics,
+        include_lag=include_lag,
+        filter_query=filter_query,
+        page=page,
+        page_size=page_size,
+    )
+    items = _items_from_response(data)
+    return {
+        "count": data.get("count", len(items)),
+        "result": data.get("result", []),
+        "page": data.get("page"),
+    }
+
+
+@mcp.tool()
+def list_vsx(
+    fabric: str | None = None,
+    include_isl_lag: bool = False,
+    include_keep_alive_interface: bool = False,
+    filter_query: str | None = None,
+    page: int | None = None,
+    page_size: int | None = None,
+) -> dict:
+    """List VSX pair configurations (the redundant switch pairing / MLAG layer).
+
+    Each VSX pair exposes its name, system MAC, keep-alive VRF/UDP port, ISL/keep-alive
+    timers, QoS trust, health and the two `vsx_peers` (primary/secondary switches). Pass
+    `fabric` (name or UUID) to scope the query to one fabric, or omit it to list VSX pairs
+    across all fabrics. Set include_isl_lag / include_keep_alive_interface to expand the
+    Inter-Switch Link LAG and keep-alive interface details.
+    """
+    if fabric is not None:
+        data = _client().list_fabric_vsx(
+            fabric_uuid=_resolve_fabric_uuid(fabric),
+            include_isl_lag=include_isl_lag,
+            include_keep_alive_interface=include_keep_alive_interface,
+            filter_query=filter_query,
+            page=page,
+            page_size=page_size,
+        )
+    else:
+        data = _client().list_vsx(
+            include_isl_lag=include_isl_lag,
+            include_keep_alive_interface=include_keep_alive_interface,
+            filter_query=filter_query,
+            page=page,
+            page_size=page_size,
+        )
+    items = _items_from_response(data)
+    return {
+        "count": data.get("count", len(items)),
+        "result": data.get("result", []),
+        "page": data.get("page"),
+    }
+
+
+@mcp.tool()
+def get_vsx(
+    fabric: str,
+    vsx_uuid: str,
+    include_isl_lag: bool = False,
+    include_keep_alive_interface: bool = False,
+    filter_query: str | None = None,
+) -> dict:
+    """Get one VSX pair configuration by UUID within a fabric.
+
+    `fabric` accepts a fabric name or UUID; it is resolved automatically.
+    """
+    return _client().get_vsx(
+        fabric_uuid=_resolve_fabric_uuid(fabric),
+        vsx_uuid=vsx_uuid,
+        include_isl_lag=include_isl_lag,
+        include_keep_alive_interface=include_keep_alive_interface,
+        filter_query=filter_query,
+    )
+
+
+@mcp.tool()
+def list_ntp_configurations(
+    fabric: str | None = None,
+    switch: str | None = None,
+    in_use_only: bool = False,
+    filter_query: str | None = None,
+    page: int | None = None,
+    page_size: int | None = None,
+) -> dict:
+    """List NTP client configurations and where they are applied.
+
+    Each object exposes its NTP servers (entry_list) and the fabrics/switches it
+    is applied to. `fabric` and `switch` accept a name or UUID and are resolved
+    automatically to scope the query; set in_use_only=True to return only
+    configurations currently applied to switches.
+    """
+    data = _client().list_ntp_configurations(
+        fabric=_resolve_fabric_uuid(fabric) if fabric is not None else None,
+        switch=_resolve_switch_uuid(switch) if switch is not None else None,
+        in_use_only=in_use_only,
+        filter_query=filter_query,
+        page=page,
+        page_size=page_size,
+    )
+    items = _items_from_response(data)
+    return {
+        "count": data.get("count", len(items)),
+        "result": data.get("result", []),
+        "page": data.get("page"),
+    }
+
+
+@mcp.tool()
+def list_dns_configurations(
+    fabric: str | None = None,
+    switch: str | None = None,
+    in_use_only: bool = False,
+    filter_query: str | None = None,
+    page: int | None = None,
+    page_size: int | None = None,
+) -> dict:
+    """List DNS client configurations and where they are applied.
+
+    Each object exposes its name servers, domain name/search list and the
+    fabrics/switches it is applied to. `fabric` and `switch` accept a name or
+    UUID and are resolved automatically to scope the query; set in_use_only=True
+    to return only configurations currently applied to switches.
+    """
+    data = _client().list_dns_configurations(
+        fabric=_resolve_fabric_uuid(fabric) if fabric is not None else None,
+        switch=_resolve_switch_uuid(switch) if switch is not None else None,
+        in_use_only=in_use_only,
+        filter_query=filter_query,
+        page=page,
+        page_size=page_size,
+    )
+    items = _items_from_response(data)
+    return {
+        "count": data.get("count", len(items)),
+        "result": data.get("result", []),
+        "page": data.get("page"),
     }
 
 

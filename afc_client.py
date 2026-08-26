@@ -207,6 +207,204 @@ class AFCClient:
             params={"switches": include_switches},
         )
 
+    # Fabric leaf-spine topology (underlay/overlay building blocks)
+    def list_leaf_spine(
+        self,
+        fabrics: list[str] | None = None,
+        include_interface: bool = False,
+        count_only: bool = False,
+        filter_query: str | None = None,
+        page: int | None = None,
+        page_size: int | None = None,
+    ) -> dict[str, Any]:
+        return self._request(
+            "GET",
+            "/fabrics/leaf_spine",
+            params={
+                "fabrics": fabrics,
+                "leaf_spine_interface": include_interface,
+                "count_only": count_only,
+                "filter": filter_query,
+                "page": page,
+                "page_size": page_size,
+            },
+        )
+
+    def list_fabric_leaf_spine(
+        self,
+        fabric_uuid: str,
+        include_interface: bool = False,
+        count_only: bool = False,
+        filter_query: str | None = None,
+        page: int | None = None,
+        page_size: int | None = None,
+    ) -> dict[str, Any]:
+        return self._request(
+            "GET",
+            f"/fabrics/{fabric_uuid}/leaf_spine",
+            params={
+                "leaf_spine_interface": include_interface,
+                "count_only": count_only,
+                "filter": filter_query,
+                "page": page,
+                "page_size": page_size,
+            },
+        )
+
+    def get_leaf_spine(
+        self,
+        fabric_uuid: str,
+        leaf_spine_uuid: str,
+        include_interface: bool = False,
+        filter_query: str | None = None,
+    ) -> dict[str, Any]:
+        return self._request(
+            "GET",
+            f"/fabrics/{fabric_uuid}/leaf_spine/{leaf_spine_uuid}",
+            params={
+                "leaf_spine_interface": include_interface,
+                "filter": filter_query,
+            },
+        )
+
+    def list_l2_leaf_spine(
+        self,
+        fabrics: list[str] | None = None,
+        include_lag: bool = False,
+        count_only: bool = False,
+        filter_query: str | None = None,
+        page: int | None = None,
+        page_size: int | None = None,
+    ) -> dict[str, Any]:
+        return self._request(
+            "GET",
+            "/fabrics/l2_leaf_spine",
+            params={
+                "fabrics": fabrics,
+                "include_lag": include_lag,
+                "count_only": count_only,
+                "filter": filter_query,
+                "page": page,
+                "page_size": page_size,
+            },
+        )
+
+    def list_vsx(
+        self,
+        fabrics: list[str] | None = None,
+        include_isl_lag: bool = False,
+        include_keep_alive_interface: bool = False,
+        count_only: bool = False,
+        filter_query: str | None = None,
+        page: int | None = None,
+        page_size: int | None = None,
+    ) -> dict[str, Any]:
+        return self._request(
+            "GET",
+            "/fabrics/vsx",
+            params={
+                "fabrics": fabrics,
+                "isl_lag": include_isl_lag,
+                "keep_alive_interface": include_keep_alive_interface,
+                "count_only": count_only,
+                "filter": filter_query,
+                "page": page,
+                "page_size": page_size,
+            },
+        )
+
+    def list_fabric_vsx(
+        self,
+        fabric_uuid: str,
+        include_isl_lag: bool = False,
+        include_keep_alive_interface: bool = False,
+        count_only: bool = False,
+        filter_query: str | None = None,
+        page: int | None = None,
+        page_size: int | None = None,
+    ) -> dict[str, Any]:
+        return self._request(
+            "GET",
+            f"/fabrics/{fabric_uuid}/vsx",
+            params={
+                "isl_lag": include_isl_lag,
+                "keep_alive_interface": include_keep_alive_interface,
+                "count_only": count_only,
+                "filter": filter_query,
+                "page": page,
+                "page_size": page_size,
+            },
+        )
+
+    def get_vsx(
+        self,
+        fabric_uuid: str,
+        vsx_uuid: str,
+        include_isl_lag: bool = False,
+        include_keep_alive_interface: bool = False,
+        filter_query: str | None = None,
+    ) -> dict[str, Any]:
+        return self._request(
+            "GET",
+            f"/fabrics/{fabric_uuid}/vsx/{vsx_uuid}",
+            params={
+                "isl_lag": include_isl_lag,
+                "keep_alive_interface": include_keep_alive_interface,
+                "filter": filter_query,
+            },
+        )
+
+    # NTP / DNS client configurations
+    def list_ntp_configurations(
+        self,
+        fabric: str | None = None,
+        switch: str | None = None,
+        in_use_only: bool = False,
+        count_only: bool = False,
+        filter_query: str | None = None,
+        page: int | None = None,
+        page_size: int | None = None,
+    ) -> dict[str, Any]:
+        return self._request(
+            "GET",
+            "/ntp_client_configurations",
+            params={
+                "fabric": fabric,
+                "switch": switch,
+                "in_use_only": in_use_only,
+                "count_only": count_only,
+                "filter": filter_query,
+                "page": page,
+                "page_size": page_size,
+            },
+        )
+
+    def list_dns_configurations(
+        self,
+        fabric: str | None = None,
+        switch: str | None = None,
+        in_use_only: bool = False,
+        management_software: bool | None = None,
+        count_only: bool = False,
+        filter_query: str | None = None,
+        page: int | None = None,
+        page_size: int | None = None,
+    ) -> dict[str, Any]:
+        return self._request(
+            "GET",
+            "/dns_client_configurations",
+            params={
+                "fabric": fabric,
+                "switch": switch,
+                "in_use_only": in_use_only,
+                "management_software": management_software,
+                "count_only": count_only,
+                "filter": filter_query,
+                "page": page,
+                "page_size": page_size,
+            },
+        )
+
     # VRF and routing domains
     def list_vrfs(
         self,

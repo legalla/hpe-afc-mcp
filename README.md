@@ -193,6 +193,32 @@ Restart Claude Desktop; `afc-mcp` appears in the tools menu.
 - `list_evpn`, `list_evpn_routes` — EVPN instances and routes.
 - `get_vrf_virtual_environment` — virtual environment bound to a VRF.
 
+### Fabric underlay/overlay & network services
+- `list_leaf_spine` — Leaf-Spine peer configurations (the fabric underlay building
+  blocks: name, QoS trust, per-switch leaf-spine peers). Pass `fabric` (**name or
+  UUID**) to scope to one fabric, or omit it to list across all fabrics. Set
+  `include_interface=True` to expand the underlying leaf-spine interface details.
+- `get_leaf_spine` — one Leaf-Spine configuration by UUID within a fabric.
+- `list_l2_leaf_spine` — Layer-2 Leaf-Spine configurations, optionally scoped by
+  `fabric` and expanded with `include_lag=True`.
+- `list_vsx` — VSX pair configurations (the redundant switch-pairing / MLAG layer:
+  name, system MAC, keep-alive VRF/UDP port, ISL/keep-alive timers, health and the
+  two `vsx_peers`). Pass `fabric` (**name or UUID**) to scope to one fabric, or omit
+  it to list across all fabrics. Set `include_isl_lag` / `include_keep_alive_interface`
+  to expand the ISL LAG and keep-alive interface details.
+- `get_vsx` — one VSX pair configuration by UUID within a fabric.
+- `list_ntp_configurations` — NTP client configurations (servers and the
+  fabrics/switches they are applied to). Filter by `fabric`/`switch` (**name or
+  UUID**) and `in_use_only`.
+- `list_dns_configurations` — DNS client configurations (name servers, domain
+  name/search list and applied fabrics/switches). Filter by `fabric`/`switch`
+  (**name or UUID**) and `in_use_only`.
+
+> Underlay/overlay, leaf-spine, VSX, NTP and DNS use the **same API mechanism across
+> AFC versions** (verified against `openapi74.json` and `openapi.json`: identical
+> paths, parameters and methods), so no version-specific handling is required.
+
+
 ### Sites & overview
 - `list_afc_sites`, `get_afc_site_inventory` — AFC (remote) sites and their inventory.
 - `get_network_overview` — aggregated network state snapshot.
