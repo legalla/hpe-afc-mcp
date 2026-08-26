@@ -271,7 +271,14 @@ def _enrich_subleaf_object(
     member) plus `switch_ports` and an `endpoints` list (``switch:port``) so the
     LAG members and upstream devices are identifiable without extra lookups.
     """
-    for group in obj.get("subleaf_leaf_peers") or []:
+    # The list endpoint returns `subleaf_leaf_peers` as a list; the single-peer
+    # endpoint returns the parent object with it as one dict. Normalize to a list.
+    peers = obj.get("subleaf_leaf_peers")
+    if isinstance(peers, dict):
+        peers = [peers]
+    for group in peers or []:
+        if not isinstance(group, dict):
+            continue
         for peer in group.get("peers") or []:
             peer_sw = peer.get("switch_uuid")
             if peer_sw:
@@ -1005,6 +1012,7 @@ def get_vsx(
 @mcp.tool()
 def list_subleaf_leaf(
     fabric: str | None = None,
+    peer_uuid: str | None = None,
     include_lag: bool = True,
     resolve_switch_names: bool = True,
     filter_query: str | None = None,
@@ -1015,64 +1023,49 @@ def list_subleaf_leaf(
 
     Each object exposes its name, type and `subleaf_leaf_peers` (the per-switch
     subleaf-leaf LAG bindings and status). Pass `fabric` (name or UUID) to scope
-    the query to one fabric, or omit it to list across all fabrics. `include_lag`
-    (default True) expands the full subleaf-leaf LAG/LACP details of each peer;
-    set it to False for a lighter response (peers and status only).
-    `resolve_switch_names` (default True) enriches each peer/LAG member with the
-    switch name, physical ports and `endpoints` (``switch:port``) so upstream
-    devices are identifiable without extra lookups.
+    the query to one fabric, or omit it to list across all fabrics.
+
+    Pass `peer_uuid` to fetch a single subleaf-leaf peer by UUID instead of the
+    full list; `fabric` is then required. `include_lag` (default True) expands the
+    full subleaf-leaf LAG/LACP details of each peer; set it to False for a lighter
+    response (peers and status only). `resolve_switch_names` (default True)
+    enriches each peer/LAG member with the switch name, physical ports and
+    `endpoints` (``switch:port``) so upstream devices are identifiable without
+    extra lookups.
     """
-    fabrics = [_resolve_fabric_uuid(fabric)] if fabric is not None else None
-    data = _client().list_subleaf_leaf(
-        fabrics=fabrics,
-        include_lag=include_lag,
-        filter_query=filter_query,
-        page=page,
-        page_size=page_size,
-    )
-    result = data.get("result", [])
+    if peer_uuid is not None:
+        if fabric is None:
+            raise ValueError("`fabric` is required when `peer_uuid` is provided.")
+        data = _client().get_subleaf_leaf_peer(
+            fabric_uuid=_resolve_fabric_uuid(fabric),
+            peer_uuid=peer_uuid,
+            include_lag=include_lag,
+            filter_query=filter_query,
+        )
+        obj = data.get("result", data)
+        result = [obj] if isinstance(obj, dict) else []
+    else:
+        fabrics = [_resolve_fabric_uuid(fabric)] if fabric is not None else None
+        data = _client().list_subleaf_leaf(
+            fabrics=fabrics,
+            include_lag=include_lag,
+            filter_query=filter_query,
+            page=page,
+            page_size=page_size,
+        )
+        result = data.get("result", [])
+
     if resolve_switch_names and include_lag and result:
         switch_names, port_to_switch = _switch_port_maps()
         for obj in result:
             if isinstance(obj, dict):
                 _enrich_subleaf_object(obj, switch_names, port_to_switch)
-    items = _items_from_response(data)
+
     return {
-        "count": data.get("count", len(items)),
+        "count": data.get("count", len(result)),
         "result": result,
         "page": data.get("page"),
     }
-
-
-@mcp.tool()
-def get_subleaf_leaf_peer(
-    fabric: str,
-    peer_uuid: str,
-    include_lag: bool = True,
-    resolve_switch_names: bool = True,
-    filter_query: str | None = None,
-) -> dict:
-    """Get one Subleaf-Leaf peer configuration by UUID within a fabric.
-
-    `fabric` accepts a fabric name or UUID; it is resolved automatically.
-    `include_lag` (default True) expands the full subleaf-leaf LAG/LACP details.
-    `resolve_switch_names` (default True) enriches each LAG member with the
-    switch name, physical ports and `endpoints` (``switch:port``).
-    """
-    data = _client().get_subleaf_leaf_peer(
-        fabric_uuid=_resolve_fabric_uuid(fabric),
-        peer_uuid=peer_uuid,
-        include_lag=include_lag,
-        filter_query=filter_query,
-    )
-    if resolve_switch_names and include_lag:
-        result = data.get("result")
-        obj = result if isinstance(result, dict) else data
-        # The peer endpoint returns a single peer group; wrap it so the shared
-        # enricher (which walks subleaf_leaf_peers) can process it.
-        switch_names, port_to_switch = _switch_port_maps()
-        _enrich_subleaf_object({"subleaf_leaf_peers": [obj]}, switch_names, port_to_switch)
-    return data
 
 
 @mcp.tool()

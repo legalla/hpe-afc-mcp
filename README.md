@@ -203,12 +203,13 @@ Restart Claude Desktop; `afc-mcp` appears in the tools menu.
   `fabric` and expanded with `include_lag=True`.
 - `list_subleaf_leaf` — Subleaf-Leaf configurations (subleaf switches attached below
   leaves: name, type and per-switch `subleaf_leaf_peers`). Pass `fabric` (**name or
-  UUID**) to scope to one fabric, or omit it to list across all fabrics. `include_lag`
-  (default `True`) expands the full subleaf-leaf LAG/LACP details; set it to `False`
-  for a lighter response. `resolve_switch_names` (default `True`) enriches each peer
-  and LAG member with the switch name, physical ports and `endpoints` (`switch:port`),
-  so the LAG members and upstream devices are identifiable without extra lookups.
-- `get_subleaf_leaf_peer` — one Subleaf-Leaf peer configuration by UUID within a fabric.
+  UUID**) to scope to one fabric, or omit it to list across all fabrics. Pass
+  `peer_uuid` to fetch a single subleaf-leaf peer instead of the full list (`fabric`
+  is then required). `include_lag` (default `True`) expands the full subleaf-leaf
+  LAG/LACP details; set it to `False` for a lighter response. `resolve_switch_names`
+  (default `True`) enriches each peer and LAG member with the switch name, physical
+  ports and `endpoints` (`switch:port`), so the LAG members and upstream devices are
+  identifiable without extra lookups.
 - `list_vsx` — VSX pair configurations (the redundant switch-pairing / MLAG layer:
   name, system MAC, keep-alive VRF/UDP port, ISL/keep-alive timers, health and the
   two `vsx_peers`). Pass `fabric` (**name or UUID**) to scope to one fabric, or omit
