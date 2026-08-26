@@ -949,7 +949,7 @@ def get_vsx(
 @mcp.tool()
 def list_subleaf_leaf(
     fabric: str | None = None,
-    include_lag: bool = False,
+    include_lag: bool = True,
     filter_query: str | None = None,
     page: int | None = None,
     page_size: int | None = None,
@@ -958,8 +958,9 @@ def list_subleaf_leaf(
 
     Each object exposes its name, type and `subleaf_leaf_peers` (the per-switch
     subleaf-leaf LAG bindings and status). Pass `fabric` (name or UUID) to scope
-    the query to one fabric, or omit it to list across all fabrics. Set
-    include_lag=True to expand the subleaf-leaf LAG details.
+    the query to one fabric, or omit it to list across all fabrics. `include_lag`
+    (default True) expands the full subleaf-leaf LAG/LACP details of each peer;
+    set it to False for a lighter response (peers and status only).
     """
     fabrics = [_resolve_fabric_uuid(fabric)] if fabric is not None else None
     data = _client().list_subleaf_leaf(
@@ -981,12 +982,13 @@ def list_subleaf_leaf(
 def get_subleaf_leaf_peer(
     fabric: str,
     peer_uuid: str,
-    include_lag: bool = False,
+    include_lag: bool = True,
     filter_query: str | None = None,
 ) -> dict:
     """Get one Subleaf-Leaf peer configuration by UUID within a fabric.
 
     `fabric` accepts a fabric name or UUID; it is resolved automatically.
+    `include_lag` (default True) expands the full subleaf-leaf LAG/LACP details.
     """
     return _client().get_subleaf_leaf_peer(
         fabric_uuid=_resolve_fabric_uuid(fabric),
