@@ -395,6 +395,7 @@ def get_server_status() -> dict:
             "vrf arp tables, ip interfaces and static routes",
             "virtual overlay and underlay details",
             "leaf-spine underlay/overlay and L2 leaf-spine configurations",
+            "subleaf-leaf configurations",
             "vsx switch-pair (mlag) configurations",
             "ntp and dns client configurations",
         ],
@@ -941,6 +942,56 @@ def get_vsx(
         vsx_uuid=vsx_uuid,
         include_isl_lag=include_isl_lag,
         include_keep_alive_interface=include_keep_alive_interface,
+        filter_query=filter_query,
+    )
+
+
+@mcp.tool()
+def list_subleaf_leaf(
+    fabric: str | None = None,
+    include_lag: bool = False,
+    filter_query: str | None = None,
+    page: int | None = None,
+    page_size: int | None = None,
+) -> dict:
+    """List Subleaf-Leaf configurations (subleaf switches attached below leaves).
+
+    Each object exposes its name, type and `subleaf_leaf_peers` (the per-switch
+    subleaf-leaf LAG bindings and status). Pass `fabric` (name or UUID) to scope
+    the query to one fabric, or omit it to list across all fabrics. Set
+    include_lag=True to expand the subleaf-leaf LAG details.
+    """
+    fabrics = [_resolve_fabric_uuid(fabric)] if fabric is not None else None
+    data = _client().list_subleaf_leaf(
+        fabrics=fabrics,
+        include_lag=include_lag,
+        filter_query=filter_query,
+        page=page,
+        page_size=page_size,
+    )
+    items = _items_from_response(data)
+    return {
+        "count": data.get("count", len(items)),
+        "result": data.get("result", []),
+        "page": data.get("page"),
+    }
+
+
+@mcp.tool()
+def get_subleaf_leaf_peer(
+    fabric: str,
+    peer_uuid: str,
+    include_lag: bool = False,
+    filter_query: str | None = None,
+) -> dict:
+    """Get one Subleaf-Leaf peer configuration by UUID within a fabric.
+
+    `fabric` accepts a fabric name or UUID; it is resolved automatically.
+    """
+    return _client().get_subleaf_leaf_peer(
+        fabric_uuid=_resolve_fabric_uuid(fabric),
+        peer_uuid=peer_uuid,
+        include_lag=include_lag,
         filter_query=filter_query,
     )
 

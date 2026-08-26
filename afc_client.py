@@ -354,6 +354,44 @@ class AFCClient:
             },
         )
 
+    def list_subleaf_leaf(
+        self,
+        fabrics: list[str] | None = None,
+        include_lag: bool = False,
+        count_only: bool = False,
+        filter_query: str | None = None,
+        page: int | None = None,
+        page_size: int | None = None,
+    ) -> dict[str, Any]:
+        return self._request(
+            "GET",
+            "/fabrics/subleaf_leaf",
+            params={
+                "fabrics": fabrics,
+                "include_lag": include_lag,
+                "count_only": count_only,
+                "filter": filter_query,
+                "page": page,
+                "page_size": page_size,
+            },
+        )
+
+    def get_subleaf_leaf_peer(
+        self,
+        fabric_uuid: str,
+        peer_uuid: str,
+        include_lag: bool = False,
+        filter_query: str | None = None,
+    ) -> dict[str, Any]:
+        return self._request(
+            "GET",
+            f"/fabrics/{fabric_uuid}/subleaf_leaf/peers/{peer_uuid}",
+            params={
+                "include_lag": include_lag,
+                "filter": filter_query,
+            },
+        )
+
     # NTP / DNS client configurations
     def list_ntp_configurations(
         self,

@@ -201,6 +201,11 @@ Restart Claude Desktop; `afc-mcp` appears in the tools menu.
 - `get_leaf_spine` — one Leaf-Spine configuration by UUID within a fabric.
 - `list_l2_leaf_spine` — Layer-2 Leaf-Spine configurations, optionally scoped by
   `fabric` and expanded with `include_lag=True`.
+- `list_subleaf_leaf` — Subleaf-Leaf configurations (subleaf switches attached below
+  leaves: name, type and per-switch `subleaf_leaf_peers`). Pass `fabric` (**name or
+  UUID**) to scope to one fabric, or omit it to list across all fabrics. Set
+  `include_lag=True` to expand the subleaf-leaf LAG details.
+- `get_subleaf_leaf_peer` — one Subleaf-Leaf peer configuration by UUID within a fabric.
 - `list_vsx` — VSX pair configurations (the redundant switch-pairing / MLAG layer:
   name, system MAC, keep-alive VRF/UDP port, ISL/keep-alive timers, health and the
   two `vsx_peers`). Pass `fabric` (**name or UUID**) to scope to one fabric, or omit
