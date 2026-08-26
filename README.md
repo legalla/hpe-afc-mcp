@@ -214,10 +214,6 @@ Restart Claude Desktop; `afc-mcp` appears in the tools menu.
   name/search list and applied fabrics/switches). Filter by `fabric`/`switch`
   (**name or UUID**) and `in_use_only`.
 
-> Underlay/overlay, leaf-spine, VSX, NTP and DNS use the **same API mechanism across
-> AFC versions** (verified against `openapi74.json` and `openapi.json`: identical
-> paths, parameters and methods), so no version-specific handling is required.
-
 
 ### Sites & overview
 - `list_afc_sites`, `get_afc_site_inventory` — AFC (remote) sites and their inventory.
